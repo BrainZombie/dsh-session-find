@@ -60,7 +60,9 @@ dsh plugin add dsh-session-find
 ## Develop
 
 ```sh
-npm test            # node test/selftest.mjs（建临时库、跑检索、验证打码）
+npm test            # node test/selftest.mjs（自建 fixture 会话 + 临时库：检索/增量/打码/工具面）
 npm run doctor      # 发布前的清单检查
-dsh-plugin verify . # 真打包、真安装、挂载检查
+dsh-plugin verify . # 真打包、真安装、挂载检查（需要装好 DSH 的机器）
 ```
+
+`npm test` 自带 fixture 会话（临时 DSH home + zstd 转写），不读你的 `~/.dsh`，所以在 CI 和干净机器上同样是绿的；`verify` 要真实宿主，只在本地跑。

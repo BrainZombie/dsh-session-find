@@ -1,14 +1,43 @@
 /**
- * Self test: real transcripts, real SQLite FTS5, stub host context.
+ * Self test: fixture transcripts, real SQLite FTS5, stub host context.
  * Run: node test/selftest.mjs
+ *
+ * The transcripts are built in a temp DSH home on purpose: pointing the test at
+ * the developer's own ~/.dsh made it depend on having session history at all,
+ * and it failed the first time it ran on a CI machine with none.
  */
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { zstdCompressSync } from 'node:zlib';
 
-import { resolveDshHome, listTranscripts, readTranscript, describeEvent } from '../lib/store.js';
+import { listTranscripts, readTranscript, describeEvent } from '../lib/store.js';
 import { openIndex, rebuildIndex, syncIndex, search, stats } from '../lib/indexdb.js';
 import { redact, looksSecret } from '../lib/redact.js';
+
+// A token no real corpus contains, so "命中" and "没命中" are both decidable.
+const PROBE = 'wombat-index-7788';
+
+/** One zstd frame of JSONL events, laid out exactly like a real transcript. */
+function writeTranscript(home, workspace, id, events) {
+    const dir = join(home, 'sessions', workspace, id);
+    mkdirSync(dir, { recursive: true });
+    const jsonl = `${events.map((event) => JSON.stringify(event)).join('\n')}\n`;
+    writeFileSync(join(dir, 'session.v4.jsonl.zstd'), zstdCompressSync(Buffer.from(jsonl, 'utf8')));
+}
+
+function buildHome() {
+    const home = mkdtempSync(join(tmpdir(), 'session-find-home-'));
+    writeTranscript(home, 'demo', 'session-aaa111', [
+        { type: 'user/message', seq: 1, data: { message: { role: 'user', content: [{ type: 'text', text: `帮我在这台机器上验一下 ${PROBE} 的检索链路` }] } } },
+        { type: 'assistant/message', seq: 2, data: { message: { role: 'assistant', content: [{ type: 'text', text: '好的，先建 dsh session 索引，再用短语查一次。' }] } } },
+        { type: 'tool/call', seq: 3, data: { name: 'bash', arguments: '{"cmd":"ls"}' } },
+    ]);
+    writeTranscript(home, 'demo', 'session-bbb222', [
+        { type: 'user/message', seq: 1, data: { message: { role: 'user', content: [{ type: 'text', text: '第二个会话，只用来验证多会话与排序。' }] } } },
+    ]);
+    return home;
+}
 
 let pass = 0;
 let fail = 0;
@@ -22,7 +51,7 @@ const check = (label, ok, detail = '') => {
     }
 };
 
-const dshHome = resolveDshHome();
+const dshHome = buildHome();
 const temp = mkdtempSync(join(tmpdir(), 'session-find-'));
 const indexPath = join(temp, 'index.db');
 
@@ -39,8 +68,7 @@ try {
     check('转写可解压出事件', events.length > 0, `${newest.id} → ${events.length} 事件`);
     const withText = events.map(describeEvent).filter((event) => event.text !== '');
     check('事件能抽出可搜索文本', withText.length > 0, `${withText.length}/${events.length}`);
-    const probe = withText.find((event) => event.text.length > 20);
-    const probeWord = probe ? probe.text.split(/\s+/).find((word) => word.length > 6) : '';
+    const probeWord = PROBE;
 
     // ---- index build ---------------------------------------------------------
     let db = await openIndex(indexPath);
@@ -94,7 +122,7 @@ try {
         effect: (callback) => disposers.push(callback()),
         logger: { info: () => {} },
     };
-    await apply(ctx, { indexPath, autoSync: true });
+    await apply(ctx, { indexPath, dshHome, autoSync: true });
     check('注册了 3 个工具', registered.length === 3, registered.map((tool) => tool.name).join(','));
     for (const tool of registered) {
         check(`${tool.name} 有 parameters 与 output`, Boolean(tool.parameters && tool.output?.schema && tool.output.render));
@@ -127,6 +155,11 @@ try {
         /* already closed */
     }
     // Windows 下 sqlite 的 -wal/-shm 可能被系统短暂持有；清理失败不算功能问题。
+    try {
+        rmSync(dshHome, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
+    } catch {
+        /* fixture 临时目录，留给系统清理 */
+    }
     let cleaned = false;
     try {
         rmSync(temp, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });

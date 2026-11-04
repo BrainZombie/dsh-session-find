@@ -1,5 +1,9 @@
 name: ci
 
+# The self test runs against fixtures, so it needs nothing but Node: no DSH
+# install, no session history. `dsh-plugin verify .` does need a real Host and is
+# documented in README (Develop).
+
 on:
   push:
     branches: [main]
@@ -13,7 +17,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Selftest
+      - name: Self test
         run: npm test
-      - name: Package check (pack, install the tarball, mount)
-        run: npx --yes dsh-plugin-toolkit@0.15.0 verify .
