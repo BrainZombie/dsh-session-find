@@ -1,0 +1,14 @@
+- insert:
+    - id: session-find
+      name: dsh-session-find
+      config:
+        # 留空 = <DSH_HOME>/storages/session-find/index.db
+        indexPath: ''
+        # 默认不脱敏：原文即能力；需要打码时把这里改成 true（或调用时传 redact:true）
+        redact: false
+        extraRedactPatterns: []
+        includeArchived: true
+        maxResults: 40
+        snippetChars: 240
+        # 每次调用前只对 mtime/size 变过的会话做增量索引
+        autoSync: true

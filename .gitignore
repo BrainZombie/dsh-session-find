@@ -1,0 +1,10 @@
+node_modules/
+*.tgz
+*.log
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
