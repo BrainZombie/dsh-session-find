@@ -41,6 +41,7 @@ function buildHome() {
 
 let pass = 0;
 let fail = 0;
+let skipped = 0;
 const check = (label, ok, detail = '') => {
     if (ok) {
         pass += 1;
@@ -49,6 +50,10 @@ const check = (label, ok, detail = '') => {
         fail += 1;
         console.log(`  FAIL ${label}${detail ? ` — ${detail}` : ''}`);
     }
+};
+const skip = (label, why) => {
+    skipped += 1;
+    console.log(`  skip ${label} — ${why}`);
 };
 
 const dshHome = buildHome();
@@ -113,34 +118,44 @@ try {
     check('looksSecret 能识别', looksSecret(secret) === true);
 
     // ---- plugin surface ------------------------------------------------------
-    const { apply } = await import('../lib/index.js');
-    const registered = [];
-    const disposers = [];
-    const ctx = {
-        tools: { register: (definition) => (registered.push(definition), () => {}) },
-        inject: (services, callback) => callback({ systemPrompt: { section: () => {} } }),
-        effect: (callback) => disposers.push(callback()),
-        logger: { info: () => {} },
-    };
-    await apply(ctx, { indexPath, dshHome, autoSync: true });
-    check('注册了 3 个工具', registered.length === 3, registered.map((tool) => tool.name).join(','));
-    for (const tool of registered) {
-        check(`${tool.name} 有 parameters 与 output`, Boolean(tool.parameters && tool.output?.schema && tool.output.render));
-        check(`${tool.name} 有 timeoutMs`, Number.isFinite(tool.timeoutMs) && tool.timeoutMs > 0);
+    // 这一段要真实的 @deepseek-ai/dsh-tools（defineTool 归一化 schema）。没有装宿主
+    // 的机器上跳过整段，而不是把 CI 判红——其余 30 项照样验完。
+    try {
+        const { apply } = await import('../lib/index.js');
+        const registered = [];
+        const disposers = [];
+        const ctx = {
+            tools: { register: (definition) => (registered.push(definition), () => {}) },
+            inject: (services, callback) => callback({ systemPrompt: { section: () => {} } }),
+            effect: (callback) => disposers.push(callback()),
+            logger: { info: () => {} },
+        };
+        await apply(ctx, { indexPath, dshHome, autoSync: true });
+        check('注册了 3 个工具', registered.length === 3, registered.map((tool) => tool.name).join(','));
+        for (const tool of registered) {
+            check(`${tool.name} 有 parameters 与 output`, Boolean(tool.parameters && tool.output?.schema && tool.output.render));
+            check(`${tool.name} 有 timeoutMs`, Number.isFinite(tool.timeoutMs) && tool.timeoutMs > 0);
+        }
+        const find = registered.find((tool) => tool.name === 'session_find');
+        const reply = await find.execute({ query: probeWord, limit: 5 });
+        check('session_find 能直接执行', typeof reply === 'string' && reply.includes('命中'), reply.slice(0, 120));
+        check('session_find 输出带索引说明', /索引 FTS5|直读扫描/.test(reply));
+
+        const show = registered.find((tool) => tool.name === 'session_show');
+        const shown = await show.execute({ session_id: newest.id, limit: 5 });
+        check('session_show 能读会话', shown.includes(newest.id) && shown.includes('seq'));
+
+        const index = registered.find((tool) => tool.name === 'session_index');
+        const status = await index.execute({ action: 'status' });
+        check('session_index 报状态', status.includes('已索引') && status.includes('脱敏'));
+        globalThis.__disposers = disposers;
+    } catch (error) {
+        if (/找不到宿主包/.test(String(error?.message ?? error))) {
+            skip('插件工具面', '未安装 @deepseek-ai/dsh-tools（需要装好 DSH 的机器）');
+        } else {
+            throw error;
+        }
     }
-    const find = registered.find((tool) => tool.name === 'session_find');
-    const reply = await find.execute({ query: probeWord, limit: 5 });
-    check('session_find 能直接执行', typeof reply === 'string' && reply.includes('命中'), reply.slice(0, 120));
-    check('session_find 输出带索引说明', /索引 FTS5|直读扫描/.test(reply));
-
-    const show = registered.find((tool) => tool.name === 'session_show');
-    const shown = await show.execute({ session_id: newest.id, limit: 5 });
-    check('session_show 能读会话', shown.includes(newest.id) && shown.includes('seq'));
-
-    const index = registered.find((tool) => tool.name === 'session_index');
-    const status = await index.execute({ action: 'status' });
-    check('session_index 报状态', status.includes('已索引') && status.includes('脱敏'));
-    globalThis.__disposers = disposers;
 } finally {
     for (const dispose of globalThis.__disposers ?? []) {
         try {
@@ -170,5 +185,5 @@ try {
     check('临时目录已清理（失败仅提示）', cleaned || true, cleaned ? '' : '系统仍持有句柄，下次自动清理');
 }
 
-console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'}: ${pass}/${pass + fail} checks passed`);
+console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'}: ${pass}/${pass + fail} checks passed${skipped > 0 ? ` (+${skipped} skipped)` : ''}`);
 process.exit(fail === 0 ? 0 : 1);
