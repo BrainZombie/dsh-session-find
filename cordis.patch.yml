@@ -1,6 +1,6 @@
 - insert:
     - id: session-find
-      name: dsh-session-find
+      name: '@brainzombie/dsh-session-find'
       config:
         # 留空 = <DSH_HOME>/storages/session-find/index.db
         indexPath: ''

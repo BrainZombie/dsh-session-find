@@ -1,8 +1,11 @@
 {
-  "name": "dsh-session-find",
-  "version": "0.1.0",
+  "name": "@brainzombie/dsh-session-find",
+  "version": "0.1.1",
   "description": "Fast, local cross-session search for DSH: persistent SQLite FTS5 index over session transcripts, with redaction. Replaces the unusable session_search on large session histories.",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {
